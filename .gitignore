@@ -1,0 +1,6 @@
+resources/
+results/
+/envs/
+workflow/external/
+.snakemake/
+*.bak

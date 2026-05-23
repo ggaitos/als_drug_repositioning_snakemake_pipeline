@@ -1,0 +1,23 @@
+executor: slurm
+jobs: 100
+default-resources:
+  slurm_account: PDE0075
+  slurm_partition: nextgen
+  mem_mb: 8000
+  runtime: 60
+set-resources:
+  harmonize:
+    mem_mb: 32000
+    runtime: 60
+  format_harmonized:
+    mem_mb: 32000
+    runtime: 60
+  impute:
+    mem_mb: 16000
+    runtime: 120
+  postprocess:
+    mem_mb: 16000
+    runtime: 300
+  spredixcan:
+    mem_mb: 16000
+    runtime: 60

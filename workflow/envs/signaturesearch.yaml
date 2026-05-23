@@ -1,0 +1,20 @@
+name: signaturesearch
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.5
+  - r-data.table
+  - r-tidyverse
+  - r-rcolorbrewer
+  - r-ggrepel
+  - r-cowplot
+  - r-ggpubr
+  - r-svglite
+  - r-gplots
+  - r-hmisc
+  - bioconductor-signaturesearch
+  - bioconductor-org.hs.eg.db
+  - bioconductor-experimenthub
+  - bioconductor-rhdf5
+  - bioconductor-mygene

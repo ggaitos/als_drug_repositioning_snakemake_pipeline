@@ -1,0 +1,130 @@
+configfile: "config/config.yaml"
+
+GWAS       = config["gwas"]["name"]
+CHROMS     = list(range(1, 23))
+BATCHES    = list(range(config["impute"]["sub_batches"]))
+TISSUES    = config["spredixcan"]["tissues"]
+SIG_TISSUE = config["signature"]["tissue"]
+
+rule all:
+    input:
+        "results/" + GWAS + "/drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv",
+        "results/" + GWAS + "/signature/ALS.SpinalCord.Signature",
+
+rule harmonize:
+    input:
+        gwas    = config["gwas"]["file"],
+        snp_map = config["reference"]["coordinate_map"],
+    output:
+        "results/" + GWAS + "/harmonized/ALS_additive_quick.txt.gz"
+    params:
+        m03  = "workflow/external/MetaXcan/software/M03_betas.py",
+        snp  = config["gwas"]["columns"]["snp"],
+        nea  = config["gwas"]["columns"]["non_effect_allele"],
+        ea   = config["gwas"]["columns"]["effect_allele"],
+        beta = config["gwas"]["columns"]["beta"],
+        pval = config["gwas"]["columns"]["pvalue"],
+        py   = "envs/imlabtools/bin/python",
+    shell:
+        "{params.py} {params.m03} "
+        "--snp_map_file {input.snp_map} --gwas_file {input.gwas} "
+        "--snp_column {params.snp} --non_effect_allele_column {params.nea} "
+        "--effect_allele_column {params.ea} --beta_column {params.beta} "
+        "--pvalue_column {params.pval} --keep_non_rsid --throw --output {output}"
+
+rule format_harmonized:
+    input:
+        harmo = "results/" + GWAS + "/harmonized/ALS_additive_quick.txt.gz",
+        gwas  = config["gwas"]["file"],
+    output:
+        "results/" + GWAS + "/harmonized_gwas/ALS.VanRheenen2021_quick.Formatted.harmonized.tabul.txt.gz"
+    params:
+        script  = "workflow/scripts/format_harmonized.R",
+        rscript = "envs/signaturesearch/bin/Rscript",
+        bgzip   = "envs/imlabtools/bin/bgzip",
+        raw     = lambda wc, output: output[0].replace(".gz", ""),
+    shell:
+        "{params.rscript} {params.script} {input.harmo} {input.gwas} {params.raw} && "
+        "{params.bgzip} -f {params.raw}"
+
+rule impute:
+    input:
+        gwas = "results/" + GWAS + "/harmonized_gwas/ALS.VanRheenen2021_quick.Formatted.harmonized.tabul.txt.gz",
+        ld   = config["reference"]["ld_blocks"],
+        geno = config["reference"]["parquet_dir"] + "/chr{chrom}.variants.parquet",
+        meta = config["reference"]["parquet_metadata"],
+    output:
+        "results/" + GWAS + "/summary_imputation/VR.ALS.quick.harmo.YESfreq_chr{chrom}_sb{batch}.txt.gz"
+    params:
+        py     = "envs/imlabtools/bin/python",
+        script = "workflow/external/summary-gwas-imputation/src/gwas_summary_imputation.py",
+        nb     = config["impute"]["sub_batches"],
+        window = config["impute"]["window"],
+        freq   = config["impute"]["frequency_filter"],
+        reg    = config["impute"]["regularization"],
+        pars   = config["impute"]["parsimony"],
+    shell:
+        "{params.py} {params.script} -by_region_file {input.ld} -gwas_file {input.gwas} "
+        "-parquet_genotype {input.geno} -parquet_genotype_metadata {input.meta} "
+        "-window {params.window} -parsimony {params.pars} -chromosome {wildcards.chrom} "
+        "-regularization {params.reg} -frequency_filter {params.freq} "
+        "-sub_batches {params.nb} -sub_batch {wildcards.batch} --standardise_dosages -output {output}"
+
+rule postprocess:
+    input:
+        gwas   = "results/" + GWAS + "/harmonized_gwas/ALS.VanRheenen2021_quick.Formatted.harmonized.tabul.txt.gz",
+        chunks = expand(
+            "results/" + GWAS + "/summary_imputation/VR.ALS.quick.harmo.YESfreq_chr{chrom}_sb{batch}.txt.gz",
+            chrom=CHROMS, batch=BATCHES),
+    output:
+        "results/" + GWAS + "/processed_summary_imputation/imputed_VR.ALS.quick.harmo.YESfreq.txt.gz"
+    params:
+        py     = "envs/imlabtools/bin/python",
+        script = "workflow/external/summary-gwas-imputation/src/gwas_summary_imputation_postprocess.py",
+        folder = "results/" + GWAS + "/summary_imputation",
+        pars   = config["impute"]["parsimony"],
+    shell:
+        "{params.py} {params.script} -gwas_file {input.gwas} -folder {params.folder} "
+        "-pattern 'VR.ALS.quick.harmo.*' -parsimony {params.pars} -output {output}"
+
+rule spredixcan:
+    input:
+        gwas = "results/" + GWAS + "/processed_summary_imputation/imputed_VR.ALS.quick.harmo.YESfreq.txt.gz",
+        db   = config["reference"]["mashr_dir"] + "/mashr_{tissue}.db",
+        cov  = config["reference"]["mashr_dir"] + "/mashr_{tissue}.txt.gz",
+    output:
+        "results/" + GWAS + "/spredixcan/VR.ALS.quick.harmo.YESfreq_PM_{tissue}.csv"
+    params:
+        py     = "envs/imlabtools/bin/python",
+        script = "workflow/external/MetaXcan/software/SPrediXcan.py",
+    shell:
+        "{params.py} {params.script} --gwas_file {input.gwas} --snp_column panel_variant_id "
+        "--effect_allele_column effect_allele --non_effect_allele_column non_effect_allele "
+        "--zscore_column zscore --model_db_path {input.db} --covariance {input.cov} "
+        "--model_db_snp_key varID --keep_non_rsid --additional_output --throw --output_file {output}"
+
+rule build_signature:
+    input:
+        spx     = "results/" + GWAS + "/spredixcan/VR.ALS.quick.harmo.YESfreq_PM_" + SIG_TISSUE + ".csv",
+        gencode = config["reference"]["gencode"],
+    output:
+        "results/" + GWAS + "/signature/ALS.SpinalCord.Signature"
+    params:
+        rscript = "envs/signaturesearch/bin/Rscript",
+        script  = "workflow/scripts/build_signature.R",
+        outdir  = "results/" + GWAS + "/signature",
+    shell:
+        "{params.rscript} {params.script} {input.spx} {input.gencode} {params.outdir}"
+
+rule signaturesearch:
+    input:
+        spx = "results/" + GWAS + "/spredixcan/VR.ALS.quick.harmo.YESfreq_PM_" + SIG_TISSUE + ".csv",
+    output:
+        "results/" + GWAS + "/drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv"
+    params:
+        rscript = "envs/signaturesearch/bin/Rscript",
+        script  = "workflow/scripts/signaturesearch.R",
+        outdir  = "results/" + GWAS + "/drugs",
+        cache   = config["experimenthub_cache"],
+    shell:
+        "{params.rscript} {params.script} {input.spx} {params.outdir} {params.cache}"
