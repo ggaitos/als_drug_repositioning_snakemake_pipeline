@@ -102,3 +102,46 @@ Drug table — parse as CSV, don't `sort` (drug names have commas):
 ## Note
 
 Validated on Van Rheenen 2021. Signature led by C9orf72; furosemide appears with strongly negative NCS, matching the original study.
+
+## Running on a different GWAS
+
+The rules never change. To run a new GWAS, edit `config/config.yaml` and run.
+
+**1. Check your GWAS file first.** Look at the header and confirm the genome build:
+
+    zcat resources/gwas/your_file.txt.gz | head -1
+
+This pipeline assumes **hg19** input with **rsIDs** (the harmonize step maps rsIDs
+via map_snp150_hg19). Two checks:
+- If your GWAS is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz`
+  (included in the sample data) instead.
+- If your file has no rsID column (only chr:pos), the quick harmonize step won't
+  work as-is and needs the fuller gwas_parsing.py approach — not covered here.
+
+**2. Edit config/config.yaml:**
+
+    gwas:
+      name: MyGWAS                       # sets output folder: results/MyGWAS/
+      file: resources/gwas/my_file.txt.gz
+      columns:                           # map YOUR headers to these roles
+        snp: <rsid column>
+        non_effect_allele: <column>
+        effect_allele: <column>
+        beta: <column>
+        pvalue: <column>
+      sample_size: <N>
+      n_cases: <N>
+
+    signature:
+      tissue: <relevant tissue>          # spinal cord is ALS-specific; change per disease
+
+**3. Run:**
+
+    envs/snakemake/bin/snakemake -n                                # dry run (should show a full fresh job set)
+    envs/snakemake/bin/snakemake --workflow-profile profiles/slurm
+
+Changing `gwas.name` sends output to a new folder, so previous runs are left
+untouched and the new GWAS runs from scratch.
+
+Note: some output filenames contain `VR.ALS` literally (kept from the original
+workflow). A new GWAS still runs correctly; the files just keep those names.
