@@ -57,18 +57,43 @@ Gives `resources/data/` with the coordinate map, 1000G panel (per-chr parquet), 
     git clone https://github.com/hakyimlab/MetaXcan.git
     git clone https://github.com/hakyimlab/summary-gwas-imputation.git
 
-## Configure
+## Configure for your GWAS
 
-Edit only `config/config.yaml`. For a new GWAS: set `gwas.name`, `gwas.file`, `gwas.columns` (map your headers), `gwas.sample_size`, `gwas.n_cases`, `signature.tissue`.
+Edit only `config/config.yaml` — the rules never change.
+
+**First, check your GWAS file.** Look at the header and confirm the genome build:
+
+    zcat resources/gwas/your_file.txt.gz | head -1
+
+This pipeline assumes **hg19** input with **rsIDs** (harmonize maps rsIDs via map_snp150_hg19). Two checks:
+- If your GWAS is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz` (included in the sample data) instead.
+- If your file has no rsID column (only chr:pos), the quick harmonize step won't work as-is and needs the fuller gwas_parsing.py approach — not covered here.
+
+**Then edit config/config.yaml:**
+
+    gwas:
+      name: MyGWAS                       # sets output folder: results/MyGWAS/
+      file: resources/gwas/my_file.txt.gz
+      columns:                           # map YOUR headers to these roles
+        snp: <rsid column>
+        non_effect_allele: <column>
+        effect_allele: <column>
+        beta: <column>
+        pvalue: <column>
+      sample_size: <N>
+      n_cases: <N>
+
+    signature:
+      tissue: <relevant tissue>          # spinal cord is ALS-specific; change per disease
 
 Imputation params (window, frequency_filter, regularization, sub_batches) are MetaXcan CAD-tutorial defaults; the original ALS swarm file wasn't published.
 
 ## Run
 
-    envs/snakemake/bin/snakemake -n                              # dry run
+    envs/snakemake/bin/snakemake -n                                  # dry run
     envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run on SLURM
 
-Run inside tmux. SLURM account/partition/memory live in `profiles/slurm/config.yaml`. Harmonize and format need ~32 GB.
+Run inside tmux. Changing `gwas.name` writes to a new `results/` folder, so previous runs are untouched and a new GWAS runs from scratch. SLURM account/partition/memory live in `profiles/slurm/config.yaml`; harmonize and format need ~32 GB.
 
 ## Output
 
@@ -76,6 +101,8 @@ In `results/<gwas.name>/`:
 - `spredixcan/` — per-tissue gene associations
 - `signature/ALS.SpinalCord.Signature` — up/down gene signature
 - `drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv` — ranked drugs (most negative NCS = strongest reversal)
+
+Some output filenames contain `VR.ALS` literally (kept from the original workflow). A new GWAS still runs correctly; the files just keep those names.
 
 ## Check the output
 
@@ -102,46 +129,3 @@ Drug table — parse as CSV, don't `sort` (drug names have commas):
 ## Note
 
 Validated on Van Rheenen 2021. Signature led by C9orf72; furosemide appears with strongly negative NCS, matching the original study.
-
-## Running on a different GWAS
-
-The rules never change. To run a new GWAS, edit `config/config.yaml` and run.
-
-**1. Check your GWAS file first.** Look at the header and confirm the genome build:
-
-    zcat resources/gwas/your_file.txt.gz | head -1
-
-This pipeline assumes **hg19** input with **rsIDs** (the harmonize step maps rsIDs
-via map_snp150_hg19). Two checks:
-- If your GWAS is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz`
-  (included in the sample data) instead.
-- If your file has no rsID column (only chr:pos), the quick harmonize step won't
-  work as-is and needs the fuller gwas_parsing.py approach — not covered here.
-
-**2. Edit config/config.yaml:**
-
-    gwas:
-      name: MyGWAS                       # sets output folder: results/MyGWAS/
-      file: resources/gwas/my_file.txt.gz
-      columns:                           # map YOUR headers to these roles
-        snp: <rsid column>
-        non_effect_allele: <column>
-        effect_allele: <column>
-        beta: <column>
-        pvalue: <column>
-      sample_size: <N>
-      n_cases: <N>
-
-    signature:
-      tissue: <relevant tissue>          # spinal cord is ALS-specific; change per disease
-
-**3. Run:**
-
-    envs/snakemake/bin/snakemake -n                                # dry run (should show a full fresh job set)
-    envs/snakemake/bin/snakemake --workflow-profile profiles/slurm
-
-Changing `gwas.name` sends output to a new folder, so previous runs are left
-untouched and the new GWAS runs from scratch.
-
-Note: some output filenames contain `VR.ALS` literally (kept from the original
-workflow). A new GWAS still runs correctly; the files just keep those names.
