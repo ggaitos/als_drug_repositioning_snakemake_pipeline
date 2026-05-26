@@ -1,4 +1,4 @@
-Steps 1–5 run in the python env, 6–7 in the R env. This is the drug-search trunk of the original analysis; S-MultiXcan (Miami plot only) and the DrugBank approved-only filter are not included.
+Steps 1–5 run in the python env, 6–8 in the R env. This reproduces the drug-search trunk of the original analysis through the approved-drug ranking. S-MultiXcan (used only for a Miami plot in the original) is not included.
 
 ## Requirements
 
@@ -6,9 +6,18 @@ Steps 1–5 run in the python env, 6–7 in the R env. This is the drug-search t
 - conda
 - ~80 GB disk for reference data and intermediates
 
-## How to run it
+## Get the code
 
-### Step 1 — Build the environments (once)
+Clone the repository and enter it. All commands below are run from the repository root.
+
+```bash
+git clone https://github.com/ggaitos/als_drug_repositioning_snakemake_pipeline.git
+cd als_drug_repositioning_snakemake_pipeline
+```
+
+## Setup (once)
+
+### Step 1 — Build the environments
 
 ```bash
 conda create -p envs/snakemake -c conda-forge -c bioconda snakemake-minimal snakemake-executor-plugin-slurm -y
@@ -16,19 +25,23 @@ conda env create -p envs/imlabtools -f workflow/envs/imlabtools.yaml
 conda env create -p envs/signaturesearch -f workflow/envs/signaturesearch.yaml
 ```
 
-### Step 2 — Get the reference data (once)
+The R environment is a large Bioconductor solve; run it in tmux so a disconnect doesn't kill it.
+
+### Step 2 — Get the reference data
 
 From Zenodo record 3657902. If wget gives a 403, get the link from the API:
 
 ```bash
 curl -s "https://zenodo.org/api/records/3657902" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f['links'].get('self')) for f in d['files']]"
-cd resources && tar -xvf sample_data.tar
+cd resources && tar -xvf sample_data.tar && cd ..
 ```
 
-### Step 3 — Build the GENCODE table (once)
+This populates `resources/data/` with the coordinate map, 1000G panel, LD blocks, and MASHR models.
+
+### Step 3 — Build the GENCODE table
 
 ```bash
-cd resources/annotation
+mkdir -p resources/annotation && cd resources/annotation
 wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_41/gencode.v41.annotation.gtf.gz
 zcat gencode.v41.annotation.gtf.gz \
  | awk 'BEGIN{FS="\t"}{split($9,a,";"); if($3~"gene") print a[1]"\t"a[3]"\t"$1":"$4"-"$5"\t"a[2]"\t"$7}' \
@@ -36,15 +49,19 @@ zcat gencode.v41.annotation.gtf.gz \
  | awk 'BEGIN{FS="\t"}{split($3,a,"[:-]"); print $1"\t"$2"\t"a[1]"\t"a[2]"\t"a[3]"\t"$4"\t"$5"\t"a[3]-a[2];}' \
  | sed "1i\\Geneid\tGeneSymbol\tChromosome\tStart\tEnd\tClass\tStrand\tLength" \
  > gencode.v41_gene_annotation_table.txt
+cd ../..
 ```
 
-### Step 4 — Clone the upstream scripts (once)
+### Step 4 — Clone the upstream scripts
 
 ```bash
-cd workflow/external
+mkdir -p workflow/external && cd workflow/external
 git clone https://github.com/hakyimlab/MetaXcan.git
 git clone https://github.com/hakyimlab/summary-gwas-imputation.git
+cd ../..
 ```
+
+## Running your GWAS
 
 ### Step 5 — Add your GWAS and check it
 
@@ -56,7 +73,11 @@ zcat resources/gwas/my_file.txt.gz | head -1
 
 The pipeline expects hg19 with rsIDs. If your file is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz`. If it has no rsID column, the quick harmonize step won't work as-is.
 
-### Step 6 — Edit `config/config.yaml`
+### Step 6 — Provide a drug list
+
+The final step ranks only listed drugs. Put a plain text file at `resources/drugbank/approved_drugs.txt`, one drug name per line (lowercase). The ALS run used an approved-drug list of ~1000 names.
+
+### Step 7 — Edit `config/config.yaml`
 
 Left side is the role the pipeline needs; right side is your file's column name. Comments show the values used for the ALS run.
 
@@ -74,24 +95,27 @@ gwas:
   n_cases: <number of cases>            # ALS: 27205
 signature:
   tissue: <tissue>                      # ALS: Brain_Spinal_cord_cervical_c-1
+drugbank:
+  approved_list: resources/drugbank/approved_drugs.txt
 ```
 
-### Step 7 — Run (inside tmux)
+### Step 8 — Run (inside tmux)
 
 ```bash
 envs/snakemake/bin/snakemake -n                                  # dry run
 envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run
 ```
 
-A new `name` writes to its own results folder, so other runs are untouched. Harmonize and format need ~32 GB; set your account and partition in `profiles/slurm/config.yaml`.
+A new `name` writes to its own results folder, so other runs are untouched. Harmonize and format need ~32 GB; set your account and partition in `profiles/slurm/config.yaml`. Run inside tmux so a dropped connection doesn't kill the controller. If a run is interrupted, clear the leftover lock with `snakemake --unlock` before relaunching — it resumes from the last completed step.
 
 ## Output
 
 In `results/<name>/`:
 
-- `spredixcan/` per-tissue gene associations
+- `spredixcan/` gene associations for the signature tissue
 - `signature/ALS.SpinalCord.Signature` the up/down signature
-- `drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv` ranked drugs (most negative NCS = strongest reversal)
+- `drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv` full ranked LINCS table
+- `drugs/approved_mean_NCS.csv` approved drugs only, one row per drug, ranked by mean NCS (most negative = strongest reversal)
 
 Check the signature has a known disease gene on top (C9orf72 for ALS):
 
@@ -99,7 +123,13 @@ Check the signature has a known disease gene on top (C9orf72 for ALS):
 column -t results/<name>/signature/ALS.SpinalCord.Signature | head
 ```
 
-Sort the drug table as a CSV, not with `sort` (drug names contain commas):
+View the top approved candidates (already sorted):
+
+```bash
+head -20 results/<name>/drugs/approved_mean_NCS.csv
+```
+
+For the full LINCS table, parse as CSV rather than using `sort` (drug names contain commas):
 
 ```python
 import csv
@@ -111,7 +141,8 @@ for r in rows[:20]:
 
 ## Notes
 
+- The approved-drug filter uses a plain name list, which substitutes for the original analysis's DrugBank join (the DrugBank tables aren't publicly redistributable). Matching is by exact lowercased name.
 - Imputation parameters follow the MetaXcan CAD tutorial; the original ALS swarm file wasn't published, so they aren't confirmed against it.
 - Python versions are pinned; R/Bioconductor is looser for portability, which can shift lower drug ranks but not top hits.
 - Some output filenames keep `VR.ALS` from the original. A new GWAS still runs fine.
-- Validated on Van Rheenen 2021: signature led by C9orf72, furosemide a top reverser.
+- Validated on Van Rheenen 2021: the spinal cord signature is led by C9orf72, and the approved-drug shortlist surfaces furosemide (validated experimentally in the original study) and edaravone (an approved ALS drug) among the top reversers.
