@@ -9,6 +9,7 @@ SIG_TISSUE = config["signature"]["tissue"]
 rule all:
     input:
         "results/" + GWAS + "/drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv",
+        "results/" + GWAS + "/drugs/approved_mean_NCS.csv",
         "results/" + GWAS + "/signature/ALS.SpinalCord.Signature",
 
 rule harmonize:
@@ -128,3 +129,15 @@ rule signaturesearch:
         cache   = config["experimenthub_cache"],
     shell:
         "{params.rscript} {params.script} {input.spx} {params.outdir} {params.cache}"
+
+rule rank_approved:
+    input:
+        lincs    = "results/" + GWAS + "/drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv",
+        approved = config["drugbank"]["approved_list"],
+    output:
+        "results/" + GWAS + "/drugs/approved_mean_NCS.csv"
+    params:
+        rscript = "envs/signaturesearch/bin/Rscript",
+        script  = "workflow/scripts/rank_approved.R",
+    shell:
+        "{params.rscript} {params.script} {input.lincs} {input.approved} {output}"

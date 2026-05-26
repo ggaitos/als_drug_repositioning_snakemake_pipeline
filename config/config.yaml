@@ -1,6 +1,6 @@
 # ===== Input GWAS — the one thing a new user changes =====
 gwas:
-  name: ALS_VanRheenen2021
+  name: ALS_fullrun
   file: resources/gwas/ALS_sumstats_EUR_only.txt.gz
   # map YOUR file's column headers to what the scripts expect
   columns:
@@ -53,3 +53,6 @@ signature:
 
 # ===== ExperimentHub cache (LINCS auto-downloads here) =====
 experimenthub_cache: resources/experimenthub_cache
+
+drugbank:
+  approved_list: resources/drugbank/approved_drugs.txt
