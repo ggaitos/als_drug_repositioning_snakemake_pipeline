@@ -1,46 +1,45 @@
 # ALS Drug Repositioning Pipeline
 
-Snakemake pipeline: GWAS summary stats -> S-PrediXcan gene signature -> SignatureSearch (LINCS) drug ranking.
+Snakemake pipeline that takes GWAS summary stats and returns a ranked drug table.
+GWAS -> S-PrediXcan gene signature -> SignatureSearch (LINCS).
 
-Port of `sarasaezALS/ALS-Drug-Repositioning`. Built and tested on OSC Ascend with the Van Rheenen 2021 ALS GWAS.
+Port of `sarasaezALS/ALS-Drug-Repositioning`. Tested on OSC Ascend with the
+Van Rheenen 2021 ALS GWAS.
 
 ## Steps
 
-1. Harmonize GWAS to GTEx reference (MetaXcan M03_betas.py)
-2. Format harmonized file (add N, merge back SE + frequency)
+1. Harmonize GWAS to the GTEx reference
+2. Format the harmonized file
 3. Impute summary stats (220 jobs: 22 chr x 10 batches)
 4. Combine imputed chunks
-5. S-PrediXcan per tissue (14: whole blood + 13 brain)
-6. Build signature from spinal cord (FDR < 0.05, up/down split)
-7. SignatureSearch vs LINCS -> ranked drugs
+5. S-PrediXcan per tissue (whole blood + 13 brain)
+6. Build signature from spinal cord (FDR < 0.05, up/down)
+7. SignatureSearch vs LINCS, ranked by NCS
+
+This covers the drug-search trunk of the original analysis. Two parts of the
+notebook are outside this pipeline: S-MultiXcan (used only for a Miami plot) and
+the final DrugBank approved-only filter (needs files that can't be redistributed).
 
 ## Requirements
 
-- SLURM cluster (set up for OSC Ascend, account PDE0075)
+- SLURM cluster (set for OSC Ascend, account PDE0075)
 - conda
-- ~80 GB disk for reference data + intermediates
+- ~80 GB disk
 
-## Setup (one time)
+## Setup (once)
 
-**Environments** (build on scratch with `-p` due to home quota):
+Build the environments on scratch:
 
     conda create -p envs/snakemake -c conda-forge -c bioconda snakemake-minimal snakemake-executor-plugin-slurm -y
     conda env create -p envs/imlabtools -f workflow/envs/imlabtools.yaml
     conda env create -p envs/signaturesearch -f workflow/envs/signaturesearch.yaml
 
-The R env is a big Bioconductor solve; run it in tmux. (YAMLs are derived from a working env, not rebuilt from scratch elsewhere — a fresh solve may need minor adjustment.)
-
-**Reference data** (not auto-downloaded). Get sample_data.tar from Zenodo record 3657902. If wget 403s, get the real link from the API:
+Get the reference data (Zenodo record 3657902). If wget gives a 403, get the link from the API:
 
     curl -s "https://zenodo.org/api/records/3657902" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f['links'].get('self')) for f in d['files']]"
-
-Then:
-
     cd resources && tar -xvf sample_data.tar
 
-Gives `resources/data/` with the coordinate map, 1000G panel (per-chr parquet), LD blocks, and MASHR models for 49 tissues.
-
-**GENCODE table** for the signature step:
+Build the GENCODE table:
 
     cd resources/annotation
     wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_41/gencode.v41.annotation.gtf.gz
@@ -51,66 +50,51 @@ Gives `resources/data/` with the coordinate map, 1000G panel (per-chr parquet), 
      | sed "1i\\Geneid\tGeneSymbol\tChromosome\tStart\tEnd\tClass\tStrand\tLength" \
      > gencode.v41_gene_annotation_table.txt
 
-**Upstream scripts:**
+Clone the upstream scripts:
 
     cd workflow/external
     git clone https://github.com/hakyimlab/MetaXcan.git
     git clone https://github.com/hakyimlab/summary-gwas-imputation.git
 
-## Configure for your GWAS
+## Configure
 
-Edit only `config/config.yaml` — the rules never change.
+Edit `config/config.yaml` only. The rules don't change.
 
-**First, check your GWAS file.** Look at the header and confirm the genome build:
+Check your GWAS header and build first:
 
     zcat resources/gwas/your_file.txt.gz | head -1
 
-This pipeline assumes **hg19** input with **rsIDs** (harmonize maps rsIDs via map_snp150_hg19). Two checks:
-- If your GWAS is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz` (included in the sample data) instead.
-- If your file has no rsID column (only chr:pos), the quick harmonize step won't work as-is and needs the fuller gwas_parsing.py approach — not covered here.
+The pipeline assumes hg19 input with rsIDs. If your GWAS is hg38, point
+`reference.coordinate_map` at `map_snp150_hg38.txt.gz` instead. If it has no rsID
+column, the quick harmonize step won't work as-is.
 
-**Then edit config/config.yaml:**
-
-    gwas:
-      name: MyGWAS                       # sets output folder: results/MyGWAS/
-      file: resources/gwas/my_file.txt.gz
-      columns:                           # map YOUR headers to these roles
-        snp: <rsid column>
-        non_effect_allele: <column>
-        effect_allele: <column>
-        beta: <column>
-        pvalue: <column>
-      sample_size: <N>
-      n_cases: <N>
-
-    signature:
-      tissue: <relevant tissue>          # spinal cord is ALS-specific; change per disease
-
-Imputation params (window, frequency_filter, regularization, sub_batches) are MetaXcan CAD-tutorial defaults; the original ALS swarm file wasn't published.
+Set in the config: `gwas.name`, `gwas.file`, the `gwas.columns` mapping,
+`gwas.sample_size`, `gwas.n_cases`, and `signature.tissue` (spinal cord is
+ALS-specific).
 
 ## Run
 
     envs/snakemake/bin/snakemake -n                                  # dry run
-    envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run on SLURM
+    envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run
 
-Run inside tmux. Changing `gwas.name` writes to a new `results/` folder, so previous runs are untouched and a new GWAS runs from scratch. SLURM account/partition/memory live in `profiles/slurm/config.yaml`; harmonize and format need ~32 GB.
+Run inside tmux. A new `gwas.name` writes to its own results folder. Harmonize and
+format need ~32 GB; set account and partition in `profiles/slurm/config.yaml`.
 
 ## Output
 
 In `results/<gwas.name>/`:
-- `spredixcan/` — per-tissue gene associations
-- `signature/ALS.SpinalCord.Signature` — up/down gene signature
-- `drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv` — ranked drugs (most negative NCS = strongest reversal)
 
-Some output filenames contain `VR.ALS` literally (kept from the original workflow). A new GWAS still runs correctly; the files just keep those names.
+- `spredixcan/` per-tissue gene associations
+- `signature/ALS.SpinalCord.Signature` the up/down signature
+- `drugs/VR.ALS.lincsmethod.lincsDS.SpinalCordc1FDR.csv` ranked drugs
 
-## Check the output
+Most negative NCS means strongest predicted reversal of the signature.
 
-Signature — expect a known disease gene near the top (C9orf72 for ALS):
+Check the signature has a known disease gene on top (C9orf72 for ALS):
 
     column -t results/<gwas.name>/signature/ALS.SpinalCord.Signature | head
 
-Drug table — parse as CSV, don't `sort` (drug names have commas):
+Sort the drug table as a CSV, not with `sort` (drug names contain commas):
 
     envs/imlabtools/bin/python - <<'PY'
     import csv
@@ -120,12 +104,11 @@ Drug table — parse as CSV, don't `sort` (drug names have commas):
         print(f"{r['pert'][:30]:30} {r['cell']:6} {float(r['NCS']):8.3f}  {r['MOAss'][:40]}")
     PY
 
-## Known limitations
+## Notes
 
-- Final DrugBank approved-only ranking not included (needs non-redistributable DB.drug_groups.tab, information.db.rda). Pipeline outputs the full LINCS table.
-- S-MultiXcan not run (fed a Miami plot in the original, not the drug list).
-- Python pins are exact (pyarrow/pandas matter); R/Bioconductor left looser for portability — a fresh build may shift lower drug ranks, not the top biology.
-
-## Note
-
-Validated on Van Rheenen 2021. Signature led by C9orf72; furosemide appears with strongly negative NCS, matching the original study.
+- Imputation parameters follow the MetaXcan CAD tutorial; the original ALS swarm
+  file wasn't published, so they aren't confirmed against it.
+- Python versions are pinned (pyarrow and pandas matter); R/Bioconductor is looser
+  for portability, which can shift lower drug ranks but not the top hits.
+- Some output filenames keep `VR.ALS` from the original. A new GWAS still runs fine.
+- Validated on Van Rheenen 2021: signature led by C9orf72, furosemide a top reverser.
