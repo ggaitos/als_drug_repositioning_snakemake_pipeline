@@ -1,4 +1,26 @@
-Steps 1–5 run in the python env, 6–8 in the R env. This reproduces the drug-search trunk of the original analysis through the approved-drug ranking. S-MultiXcan (used only for a Miami plot in the original) is not included.
+# ALS Drug Repositioning Pipeline
+
+Takes a GWAS and returns a ranked drug table.
+GWAS -> S-PrediXcan gene signature -> SignatureSearch (LINCS) -> approved-drug ranking.
+
+Port of [`sarasaezALS/ALS-Drug-Repositioning`](https://github.com/sarasaezALS/ALS-Drug-Repositioning). Tested on OSC Ascend with the Van Rheenen 2021 ALS GWAS.
+
+## Pipeline steps
+
+```
+config.yaml -> GWAS
+   1. Harmonize       map to GTEx reference
+   2. Format          add N, merge SE + frequency
+   3. Impute          fill missing variants (220 jobs)
+   4. Combine         merge imputed chunks
+   5. S-PrediXcan     gene associations (signature tissue)
+   6. Signature       spinal cord, FDR < 0.05, up/down
+   7. SignatureSearch rank drugs by NCS
+   8. Rank approved   filter to approved drugs, mean NCS
+-> ranked approved-drug shortlist
+```
+
+Steps 1-5 run in the python env, 6-8 in the R env. This reproduces the drug-search trunk of the original analysis through the approved-drug ranking. S-MultiXcan (used only for a Miami plot in the original) is not included.
 
 ## Requirements
 
@@ -17,7 +39,7 @@ cd als_drug_repositioning_snakemake_pipeline
 
 ## Setup (once)
 
-### Step 1 — Build the environments
+### Step 1 - Build the environments
 
 ```bash
 conda create -p envs/snakemake -c conda-forge -c bioconda snakemake-minimal snakemake-executor-plugin-slurm -y
@@ -27,7 +49,7 @@ conda env create -p envs/signaturesearch -f workflow/envs/signaturesearch.yaml
 
 The R environment is a large Bioconductor solve; run it in tmux so a disconnect doesn't kill it.
 
-### Step 2 — Get the reference data
+### Step 2 - Get the reference data
 
 From Zenodo record 3657902. If wget gives a 403, get the link from the API:
 
@@ -38,7 +60,7 @@ cd resources && tar -xvf sample_data.tar && cd ..
 
 This populates `resources/data/` with the coordinate map, 1000G panel, LD blocks, and MASHR models.
 
-### Step 3 — Build the GENCODE table
+### Step 3 - Build the GENCODE table
 
 ```bash
 mkdir -p resources/annotation && cd resources/annotation
@@ -52,7 +74,7 @@ zcat gencode.v41.annotation.gtf.gz \
 cd ../..
 ```
 
-### Step 4 — Clone the upstream scripts
+### Step 4 - Clone the upstream scripts
 
 ```bash
 mkdir -p workflow/external && cd workflow/external
@@ -63,7 +85,7 @@ cd ../..
 
 ## Running your GWAS
 
-### Step 5 — Add your GWAS and check it
+### Step 5 - Add your GWAS and check it
 
 Put your file in `resources/gwas/`, then check its header and build:
 
@@ -73,11 +95,11 @@ zcat resources/gwas/my_file.txt.gz | head -1
 
 The pipeline expects hg19 with rsIDs. If your file is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz`. If it has no rsID column, the quick harmonize step won't work as-is.
 
-### Step 6 — Provide a drug list
+### Step 6 - Provide a drug list
 
 The final step ranks only listed drugs. Put a plain text file at `resources/drugbank/approved_drugs.txt`, one drug name per line (lowercase). The ALS run used an approved-drug list of ~1000 names.
 
-### Step 7 — Edit `config/config.yaml`
+### Step 7 - Edit `config/config.yaml`
 
 Left side is the role the pipeline needs; right side is your file's column name. Comments show the values used for the ALS run.
 
@@ -99,14 +121,14 @@ drugbank:
   approved_list: resources/drugbank/approved_drugs.txt
 ```
 
-### Step 8 — Run (inside tmux)
+### Step 8 - Run (inside tmux)
 
 ```bash
 envs/snakemake/bin/snakemake -n                                  # dry run
 envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run
 ```
 
-A new `name` writes to its own results folder, so other runs are untouched. Harmonize and format need ~32 GB; set your account and partition in `profiles/slurm/config.yaml`. Run inside tmux so a dropped connection doesn't kill the controller. If a run is interrupted, clear the leftover lock with `snakemake --unlock` before relaunching — it resumes from the last completed step.
+A new `name` writes to its own results folder, so other runs are untouched. Harmonize and format need ~32 GB; set your account and partition in `profiles/slurm/config.yaml`. Run inside tmux so a dropped connection doesn't kill the controller. If a run is interrupted, clear the leftover lock with `snakemake --unlock` before relaunching - it resumes from the last completed step.
 
 ## Output
 
