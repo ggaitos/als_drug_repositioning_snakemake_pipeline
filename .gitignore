@@ -4,3 +4,4 @@ results/
 workflow/external/
 .snakemake/
 *.bak
+*.log
