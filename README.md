@@ -2,13 +2,13 @@ Steps 1–5 run in the python env, 6–7 in the R env. This is the drug-search t
 
 ## Requirements
 
-- SLURM cluster (set for OSC Ascend, account PDE0075)
+- A SLURM cluster
 - conda
-- ~80 GB disk
+- ~80 GB disk for reference data and intermediates
 
-## Setup (once)
+## How to run it
 
-Build the environments on scratch:
+### Step 1 — Build the environments (once)
 
 ```bash
 conda create -p envs/snakemake -c conda-forge -c bioconda snakemake-minimal snakemake-executor-plugin-slurm -y
@@ -16,14 +16,16 @@ conda env create -p envs/imlabtools -f workflow/envs/imlabtools.yaml
 conda env create -p envs/signaturesearch -f workflow/envs/signaturesearch.yaml
 ```
 
-Get the reference data (Zenodo record 3657902). If wget gives a 403, get the link from the API:
+### Step 2 — Get the reference data (once)
+
+From Zenodo record 3657902. If wget gives a 403, get the link from the API:
 
 ```bash
 curl -s "https://zenodo.org/api/records/3657902" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f['links'].get('self')) for f in d['files']]"
 cd resources && tar -xvf sample_data.tar
 ```
 
-Build the GENCODE table:
+### Step 3 — Build the GENCODE table (once)
 
 ```bash
 cd resources/annotation
@@ -36,7 +38,7 @@ zcat gencode.v41.annotation.gtf.gz \
  > gencode.v41_gene_annotation_table.txt
 ```
 
-Clone the upstream scripts:
+### Step 4 — Clone the upstream scripts (once)
 
 ```bash
 cd workflow/external
@@ -44,11 +46,9 @@ git clone https://github.com/hakyimlab/MetaXcan.git
 git clone https://github.com/hakyimlab/summary-gwas-imputation.git
 ```
 
-## Running your GWAS
+### Step 5 — Add your GWAS and check it
 
-You edit `config/config.yaml`, then run. The rules never change.
-
-**1. Put your file in `resources/gwas/` and check its header and build:**
+Put your file in `resources/gwas/`, then check its header and build:
 
 ```bash
 zcat resources/gwas/my_file.txt.gz | head -1
@@ -56,32 +56,34 @@ zcat resources/gwas/my_file.txt.gz | head -1
 
 The pipeline expects hg19 with rsIDs. If your file is hg38, point `reference.coordinate_map` at `map_snp150_hg38.txt.gz`. If it has no rsID column, the quick harmonize step won't work as-is.
 
-**2. Set these in `config/config.yaml`** (left = the role the pipeline needs, right = your file's actual column name):
+### Step 6 — Edit `config/config.yaml`
+
+Left side is the role the pipeline needs; right side is your file's column name. Comments show the values used for the ALS run.
 
 ```yaml
 gwas:
-  name: MyGWAS                 # output goes to results/MyGWAS/
+  name: MyGWAS                          # output goes to results/MyGWAS/
   file: resources/gwas/my_file.txt.gz
   columns:
-    snp: rsid
-    non_effect_allele: other_allele
-    effect_allele: effect_allele
-    beta: beta
-    pvalue: p_value
-  sample_size: 138086
-  n_cases: 27205
+    snp: <rsid column>                  # ALS: rsid
+    non_effect_allele: <column>         # ALS: other_allele
+    effect_allele: <column>             # ALS: effect_allele
+    beta: <column>                      # ALS: beta
+    pvalue: <column>                    # ALS: p_value
+  sample_size: <total N>                # ALS: 138086
+  n_cases: <number of cases>            # ALS: 27205
 signature:
-  tissue: Brain_Spinal_cord_cervical_c-1
+  tissue: <tissue>                      # ALS: Brain_Spinal_cord_cervical_c-1
 ```
 
-**3. Run** (inside tmux). A new `name` writes to its own results folder, so other runs are untouched:
+### Step 7 — Run (inside tmux)
 
 ```bash
 envs/snakemake/bin/snakemake -n                                  # dry run
 envs/snakemake/bin/snakemake --workflow-profile profiles/slurm   # run
 ```
 
-Harmonize and format need ~32 GB; set account and partition in `profiles/slurm/config.yaml`.
+A new `name` writes to its own results folder, so other runs are untouched. Harmonize and format need ~32 GB; set your account and partition in `profiles/slurm/config.yaml`.
 
 ## Output
 
