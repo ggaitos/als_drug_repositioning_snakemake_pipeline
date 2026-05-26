@@ -21,3 +21,4 @@ set-resources:
   spredixcan:
     mem_mb: 16000
     runtime: 60
+latency-wait: 60
